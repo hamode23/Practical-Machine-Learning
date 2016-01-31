@@ -1,0 +1,164 @@
+---
+title: "Practical Machine Learning Course - Final Project"
+author: "Muhammad Mahagne"
+date: "January 28, 2016"
+output: html_document
+---
+
+
+##Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+##Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+
+## Reproducibility
+*Load required libraries*
+
+```{r results='hide', message=FALSE, warning=FALSE}
+library(caret)
+library(ggplot2)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(caTools)
+library(kernlab)
+library(adabag)
+library(plyr)
+
+set.seed (2324)
+```
+
+## Load the dataset
+
+*Set training and test data*
+
+```{r}
+trainingURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testingURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+trainingFile <- "pm-training.csv"
+
+if (file.exists(trainingFile)){
+        training <- read.csv(trainingFile , na.strings = c("NA" , "") )
+} else {
+        download.file(trainingURL, trainingFile)
+        training <- read.csv(trainingFile , na.strings = c("NA" , ""))
+}
+
+testingFile <- "pm-testing.csv"
+
+if (file.exists(testingFile)){
+        test <- read.csv(testingFile , na.strings = c("NA" , "") )
+} else {
+        download.file(testingURL, testingFile)
+        test <- read.csv(testingFile , na.strings = c("NA" , ""))
+}
+
+```
+
+##Explore the training dataset
+I'm not printing the results inside the report due to size
+
+```{r  results="hide"}
+dim(training)
+head(training)
+summary(training)
+```
+
+#Training and Test Sets - Cleaning and pre processing
+All following steps will be run on both training and test data sets
+
+Due to the large data set and in order to make it easier to work with it, I cleaned the dataset from the variables that have high share of NAs or variables which characterized by low variance
+```{r}
+nearzero <- caret::nearZeroVar(training, saveMetrics = TRUE)
+training <- training[, !nearzero$nzv]
+test <- test[,!nearzero$nzv]
+```
+
+Remove variables with more than 50% missing values
+```{r}
+varRemove <- sapply(colnames(training), 
+                    function(x) if(sum(is.na(training[, x])) > 0.50*nrow(training)){
+                      return(TRUE)
+                    }else{
+                      return(FALSE)}
+  )
+
+training <- training[, !varRemove]
+test <- test[, !varRemove]
+```
+
+Remove columns which dont impact the prediction (i.e. name , entry time and date etc.)
+```{r}
+training <- training[,-(1:6)]
+test <- test[,-(1:6)]
+```
+
+Find variables with high correlation (exclude "classe" variable) in order to remove variables based on pair-wise correlations.
+```{r}
+high_cor <- caret::findCorrelation(cor(training [,-53]) , cutoff = 0.9) 
+names(training)[high_cor]
+```
+we can see that about 15% of the variables are correlated , therefore Principal component analysis (PCA) technique will be used.
+
+##Partioning the training set into two sets
+
+```{r}
+inTrain <- caret::createDataPartition(y=training$classe, p=0.6, list=FALSE)
+trainingDat <- training[inTrain, ]
+testingDat <- training[-inTrain, ]
+dim(trainingDat)
+dim(testingDat)
+```
+
+##Perform Cross Validation and Model Specification
+I will use trainControl to run 5 fold cross valication with pca pre process option. It will help not to have overfitting in addition it will reduce number of predectors and reduce noise.
+
+```{r}
+trainingControl <- caret::trainControl (method= "cv" ,number = 5 , preProcOptions = "pca" ,  verboseIter = FALSE , allowParallel = TRUE )
+```
+
+Now I will estimate two top performing algorithms ,Random Forest and boosting, then compare the accuracy to decide which model to use in order to predict classe in test data set. 
+
+*Random Forest*
+```{r results="hide"}
+rf <- caret::train(classe ~ ., data = trainingDat, method = "rf", trControl= trainingControl)
+pred_rf <- predict(rf,testingDat)
+```
+```{r}
+confusionMatrix(pred_rf, testingDat$classe)
+```
+
+*Boosting*
+```{r results="hide"}
+bs <- caret::train(classe ~ ., data = trainingDat, method = "gbm", trControl= trainingControl)
+pred_bs <- predict(bs,testingDat)
+```
+```{r}
+confusionMatrix(pred_bs, testingDat$classe)
+```
+
+## Conclusion
+Comparing the results summary of the two models , I find that accurancy of Random Forest (~0.99) model is higher than boosting model (~0.96) . In addition the accurancy of Random Forest is more than 0.99 which is very high meaning model is very accurate.
+
+##Predict test data with random forest model in order to answer the assignment
+
+```{r}
+test_pred_rf <- predict(rf,test)
+
+n <- 20
+for(i in 1:n){
+                x <- paste("Answer",i, "=" ,test_pred_rf[i]   )
+                print(x)
+             }
+```
